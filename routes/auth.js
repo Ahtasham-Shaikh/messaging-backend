@@ -7,13 +7,57 @@ const authenticateToken = require("../middlewares/auth");
 
 const router = express.Router();
 
+// Register route to create a new user
+router.post("/register", async (req, res) => {
+  const { username, password } = req.body;
+
+  // Basic validation
+  if (!username || !password) {
+    return res
+      .status(400)
+      .json({ message: "Username and password are required" });
+  }
+
+  try {
+    // Check if the user already exists
+    const [existingUsers] = await db.execute(
+      "SELECT * FROM users WHERE username = ?",
+      [username],
+    );
+
+    if (existingUsers.length > 0) {
+      return res.status(409).json({ message: "Username already exists" });
+    }
+
+    // Hash the password
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Insert the new user into the database
+    const [result] = await db.execute(
+      "INSERT INTO users (username, password) VALUES (?, ?)",
+      [username, hashedPassword],
+    );
+
+    res.status(201).json({
+      message: "User registered successfully",
+      userId: result.insertId,
+    });
+  } catch (err) {
+    console.error("Registration error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // Login route to generate a JWT token
 router.post("/login", async (req, res) => {
   const { username, password } = req.body;
 
   // Basic validation
   if (!username || !password) {
-    return res.status(400).json({ message: "Username and password are required" });
+    return res
+      .status(400)
+      .json({ message: "Username and password are required" });
   }
 
   try {

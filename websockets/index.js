@@ -2,9 +2,7 @@ const { WebSocketServer } = require("ws");
 const jwt = require("jsonwebtoken");
 const url = require("url");
 const config = require("../config");
-
-// Optional: You can keep tracked users in a Map for quick lookups
-// const connectedUsers = new Map(); // e.g., connectedUsers.set(user.name, ws);
+const db = require("../config/db");
 
 const setupWebSocket = (server) => {
   // Initialize WebSocket server attached to the HTTP server
@@ -32,10 +30,10 @@ const setupWebSocket = (server) => {
       // Attach user information to the WebSocket object for later use
       ws.user = user;
       console.log(
-        `New WebSocket connection: ${req.socket.remoteAddress} (User: ${user.name})`,
+        `New WebSocket connection: ${req.socket.remoteAddress} (User: ${user.name}, ID: ${user.id})`,
       );
 
-      ws.on("message", (message) => {
+      ws.on("message", async (message) => {
         try {
           // Parse the incoming message as JSON
           const parsedMessage = JSON.parse(message.toString());
@@ -44,7 +42,31 @@ const setupWebSocket = (server) => {
           if (parsedMessage.type === "direct_message") {
             const { recipient, content } = parsedMessage;
 
-            // Find the recipient in the connected clients
+            // 1. Find recipient ID from the database using username
+            const [users] = await db.execute(
+              "SELECT id FROM users WHERE username = ?",
+              [recipient],
+            );
+
+            if (users.length === 0) {
+              return ws.send(
+                JSON.stringify({
+                  type: "error",
+                  message: `User ${recipient} does not exist.`,
+                }),
+              );
+            }
+
+            const receiverId = users[0].id;
+            const senderId = user.id;
+
+            // 2. Store the message in the database
+            await db.execute(
+              "INSERT INTO messages (sender_id, receiver_id, content) VALUES (?, ?, ?)",
+              [senderId, receiverId, content],
+            );
+
+            // 3. Find the recipient in the connected clients to deliver in real-time
             let recipientFound = false;
 
             wss.clients.forEach((client) => {
@@ -67,16 +89,10 @@ const setupWebSocket = (server) => {
             });
 
             if (!recipientFound) {
-              // Optionally notify the sender that the recipient is offline
-              ws.send(
-                JSON.stringify({
-                  type: "error",
-                  message: `User ${recipient} is currently offline.`,
-                }),
-              );
+              console.log(`User ${recipient} is offline. Message saved to DB.`);
             }
           } else if (parsedMessage.type === "broadcast") {
-            // Optional: Keep the broadcast feature for group chats or testing
+            // Broadcast feature (Optional: doesn't save to DB for now unless requested)
             wss.clients.forEach((client) => {
               if (client.readyState === ws.OPEN) {
                 client.send(
@@ -94,7 +110,7 @@ const setupWebSocket = (server) => {
           ws.send(
             JSON.stringify({
               type: "error",
-              message: "Invalid message format. Expected JSON.",
+              message: "Invalid message format or server error.",
             }),
           );
         }
@@ -103,14 +119,6 @@ const setupWebSocket = (server) => {
       ws.on("close", () => {
         console.log(`Client disconnected (User: ${user.name})`);
       });
-
-      // Send a welcome message to the newly connected client
-      ws.send(
-        JSON.stringify({
-          type: "system",
-          content: `Welcome to the messaging server, ${user.name}!`,
-        }),
-      );
     });
   });
 
