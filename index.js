@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const config = require("./config");
+const db = require("./config/db"); // Initialize MySQL Connection
 const authRoutes = require("./routes/auth");
 const setupWebSocket = require("./websockets");
 

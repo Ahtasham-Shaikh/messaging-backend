@@ -1,27 +1,51 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
 const config = require("../config");
+const db = require("../config/db");
 const authenticateToken = require("../middlewares/auth");
 
 const router = express.Router();
 
 // Login route to generate a JWT token
-router.post("/login", (req, res) => {
+router.post("/login", async (req, res) => {
   const { username, password } = req.body;
 
   // Basic validation
-  if (!username) {
-    return res.status(400).json({ message: "Username is required" });
+  if (!username || !password) {
+    return res.status(400).json({ message: "Username and password are required" });
   }
 
-  // In a real application, you would authenticate the user against a database here.
-  // We're using a mock user object for demonstration purposes.
-  const user = { name: username };
+  try {
+    // Authenticate the user against the database
+    const [rows] = await db.execute("SELECT * FROM users WHERE username = ?", [
+      username,
+    ]);
 
-  // Sign a new token that expires in 1 hour
-  const accessToken = jwt.sign(user, config.jwtSecret, { expiresIn: "1h" });
+    if (rows.length === 0) {
+      return res.status(401).json({ message: "Invalid username or password" });
+    }
 
-  res.json({ accessToken });
+    const dbUser = rows[0];
+
+    // Verify password using bcrypt
+    const isMatch = await bcrypt.compare(password, dbUser.password);
+
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid username or password" });
+    }
+
+    // Prepare payload
+    const user = { id: dbUser.id, name: dbUser.username };
+
+    // Sign a new token that expires in 1 hour
+    const accessToken = jwt.sign(user, config.jwtSecret, { expiresIn: "1h" });
+
+    res.json({ accessToken });
+  } catch (err) {
+    console.error("Login error:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
 });
 
 // Example of a protected HTTP route
