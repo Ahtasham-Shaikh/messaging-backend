@@ -3,6 +3,7 @@ const cors = require("cors");
 const config = require("./config");
 const db = require("./config/db"); // Initialize MySQL Connection
 const authRoutes = require("./routes/auth");
+const userRoutes = require("./routes/users");
 const setupWebSocket = require("./websockets");
 
 const app = express();
@@ -14,8 +15,9 @@ app.get("/", (req, res) => {
   res.send("Messaging Backend is running");
 });
 
-// Use authentication routes
+// Use API routes
 app.use("/", authRoutes);
+app.use("/users", userRoutes);
 
 // Create Express HTTP server
 const server = app.listen(config.port, () => {

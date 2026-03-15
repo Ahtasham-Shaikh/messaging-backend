@@ -3,6 +3,9 @@ const jwt = require("jsonwebtoken");
 const url = require("url");
 const config = require("../config");
 
+// Optional: You can keep tracked users in a Map for quick lookups
+// const connectedUsers = new Map(); // e.g., connectedUsers.set(user.name, ws);
+
 const setupWebSocket = (server) => {
   // Initialize WebSocket server attached to the HTTP server
   const wss = new WebSocketServer({ server });
@@ -33,21 +36,68 @@ const setupWebSocket = (server) => {
       );
 
       ws.on("message", (message) => {
-        console.log(`Received message from ${user.name}: ${message}`);
+        try {
+          // Parse the incoming message as JSON
+          const parsedMessage = JSON.parse(message.toString());
+          console.log(`Parsed message from ${user.name}:`, parsedMessage);
 
-        // Broadcast message to all connected clients
-        wss.clients.forEach((client) => {
-          if (client.readyState === ws.OPEN) {
-            // Optionally, include sender metadata in the outgoing message
-            client.send(
-              JSON.stringify({
-                type: "message",
-                sender: user.name,
-                content: message.toString(),
-              }),
-            );
+          if (parsedMessage.type === "direct_message") {
+            const { recipient, content } = parsedMessage;
+
+            // Find the recipient in the connected clients
+            let recipientFound = false;
+
+            wss.clients.forEach((client) => {
+              if (
+                client.readyState === ws.OPEN &&
+                client.user &&
+                client.user.name === recipient
+              ) {
+                // Send the message only to the targeted recipient
+                client.send(
+                  JSON.stringify({
+                    type: "direct_message",
+                    sender: user.name, // The user who sent the message
+                    content: content,
+                    timestamp: new Date().toISOString(),
+                  }),
+                );
+                recipientFound = true;
+              }
+            });
+
+            if (!recipientFound) {
+              // Optionally notify the sender that the recipient is offline
+              ws.send(
+                JSON.stringify({
+                  type: "error",
+                  message: `User ${recipient} is currently offline.`,
+                }),
+              );
+            }
+          } else if (parsedMessage.type === "broadcast") {
+            // Optional: Keep the broadcast feature for group chats or testing
+            wss.clients.forEach((client) => {
+              if (client.readyState === ws.OPEN) {
+                client.send(
+                  JSON.stringify({
+                    type: "broadcast",
+                    sender: user.name,
+                    content: parsedMessage.content,
+                  }),
+                );
+              }
+            });
           }
-        });
+        } catch (error) {
+          console.error("Error processing message:", error);
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              message: "Invalid message format. Expected JSON.",
+            }),
+          );
+        }
       });
 
       ws.on("close", () => {
