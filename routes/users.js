@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../config/db");
 const authenticateToken = require("../middlewares/auth");
+const onlineUsers = require("../websockets/onlineUsers");
 
 const router = express.Router();
 
@@ -9,15 +10,45 @@ const router = express.Router();
 router.get("/contacts", authenticateToken, async (req, res) => {
   console.log("trying get contacts");
   try {
-    const userId = req.user.id; // Extracted from the validated JWT token payload
+    const userId = req.user.id;
+    const { usernames } = req.query; // Expecting ?usernames[]=user1&usernames[]=user2
 
-    // Query the database for other users
-    const [users] = await db.execute(
-      "SELECT id, username FROM users WHERE id != ? LIMIT 10",
-      [userId],
-    );
+    let users;
 
-    res.json({ contacts: users });
+    if (usernames && Array.isArray(usernames) && usernames.length > 0) {
+      // 1. Fetch specific users by username array
+      const [rows] = await db.execute(
+        `SELECT id, username, last_seen FROM users WHERE username IN (${usernames.map(() => "?").join(",")})`,
+        usernames
+      );
+
+      // Map the results back to the original order and include nulls for missing users
+      users = usernames.map((name) => {
+        const found = rows.find((u) => u.username === name);
+        return found || { username: name, id: null, last_seen: null, not_found: true };
+      });
+    } else {
+      // 2. Fetch 10 random users if no array is provided (excluding self)
+      [users] = await db.execute(
+        "SELECT id, username, last_seen FROM users WHERE id != ? ORDER BY RAND() LIMIT 10",
+        [userId]
+      );
+    }
+
+    // Add online status to each user
+    const usersWithStatus = users.map((u) => {
+      if (u.not_found) return null; // Return null as requested for missing users
+
+      const isOnline = onlineUsers.has(u.id);
+      return {
+        id: u.id,
+        username: u.username,
+        is_online: isOnline,
+        last_seen: isOnline ? "Online" : u.last_seen || "Never",
+      };
+    });
+
+    res.json({ contacts: usersWithStatus });
   } catch (err) {
     console.error("Error fetching contacts:", err);
     res.status(500).json({ message: "Internal server error" });

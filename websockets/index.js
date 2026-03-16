@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const url = require("url");
 const config = require("../config");
 const db = require("../config/db");
+const onlineUsers = require("./onlineUsers");
 
 const setupWebSocket = (server) => {
   // Initialize WebSocket server attached to the HTTP server
@@ -29,6 +30,10 @@ const setupWebSocket = (server) => {
 
       // Attach user information to the WebSocket object for later use
       ws.user = user;
+      
+      // Add user to online users set
+      onlineUsers.add(user.id);
+      
       console.log(
         `New WebSocket connection: ${req.socket.remoteAddress} (User: ${user.name}, ID: ${user.id})`,
       );
@@ -116,8 +121,20 @@ const setupWebSocket = (server) => {
         }
       });
 
-      ws.on("close", () => {
+      ws.on("close", async () => {
         console.log(`Client disconnected (User: ${user.name})`);
+        
+        // Remove user from online users set
+        onlineUsers.delete(user.id);
+        
+        try {
+          // Update last_seen timestamp when the user disconnects
+          await db.execute("UPDATE users SET last_seen = NOW() WHERE id = ?", [
+            user.id,
+          ]);
+        } catch (err) {
+          console.error("Error updating last_seen:", err);
+        }
       });
     });
   });
